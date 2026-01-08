@@ -1,40 +1,69 @@
-import { createFileRoute, Link, notFound } from '@tanstack/react-router'
-import { Button } from '@/components/ui/button'
-
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card'
 import { RecommendedProducts } from '@/components/RecommendedProducts'
-import { ArrowLeftIcon, ShoppingBagIcon, SparklesIcon } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
 import { ProductSelect } from '@/db/schema'
+import {
+  createFileRoute,
+  Link,
+  notFound,
+  useRouter,
+} from '@tanstack/react-router'
+import { createServerFn } from '@tanstack/react-start'
+import { ArrowLeftIcon, ShoppingBagIcon, SparklesIcon } from 'lucide-react'
 import { Suspense } from 'react'
 import { Skeleton } from '@/components/ui/skeleton'
+import { mutateCartFn } from '../cart'
+import { useQueryClient } from '@tanstack/react-query'
 
+const fetchProductById = createServerFn({ method: 'POST' })
+  .inputValidator((data: { id: string }) => data)
+  .handler(async ({ data }) => {
+    const { getProductById } = await import('@/data/products')
+    const product = await getProductById(data.id)
+    return product
+  })
+
+const fetchRecommendedProducts = createServerFn({ method: 'GET' }).handler(
+  async () => {
+    const { getRecommededProducts } = await import('@/data/products')
+    return getRecommededProducts()
+  },
+)
 
 export const Route = createFileRoute('/products/$id')({
   component: RouteComponent,
-  loader : async ({params}) => {
-    const {getRecommededProducts, getProductById} = await import('@/data/products')
-
-    const recommendedProducts  =  getRecommededProducts()
-    const product = await getProductById(params.id)
-    if(!product) { 
+  loader: async ({ params }) => {
+    // Use server functions to ensure server-only execution
+    const product = await fetchProductById({ data: { id: params.id } })
+    if (!product) {
       throw notFound()
     }
-    return {product, recommendedProducts:recommendedProducts}
+    // Return recommendedProducts as a Promise for Suspense
+    const recommendedProducts = fetchRecommendedProducts()
+    console.log('product', product)
+    return { product, recommendedProducts }
   },
-  head : async ({ loaderData: data}) => {
-    const {product} = data as {
+  head: async ({ loaderData: data }) => {
+    const { product } = data as {
       product: ProductSelect
-      recommendedProducts : Promise<ProductSelect[]>
+      recommendedProducts: Promise<ProductSelect[]>
     }
     console.log('product in head', product)
-    if(!product) {
+    if (!product) {
       return {}
     }
     return {
-      meta : [
-        {name: 'description', content : product?.description},
-        {name: 'image', content : product?.image},
-        {name: 'title', content: product?.name},
+      meta: [
+        { name: 'description', content: product?.description },
+        { name: 'image', content: product?.image },
+        { name: 'title', content: product?.name },
         {
           name: 'canonical',
           content:
@@ -55,7 +84,9 @@ export const Route = createFileRoute('/products/$id')({
 })
 
 function RouteComponent() {
-  const {product, recommendedProducts} = Route.useLoaderData()
+  const router = useRouter()
+  const queryClient = useQueryClient()
+  const { product, recommendedProducts } = Route.useLoaderData()
   return (
     <div>
       <Card className="max-w-4xl mx-auto p-6">
@@ -117,7 +148,22 @@ function RouteComponent() {
                 <div className="flex flex-wrap gap-3">
                   <Button
                     className="bg-slate-900 px-4 text-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:bg-white dark:text-slate-900"
-                    
+                    onClick={async (e) => {
+                      console.log('add to cart')
+                      e.preventDefault()
+                      e.stopPropagation()
+                      await mutateCartFn({
+                        data: {
+                          action: 'add',
+                          productId: product.id,
+                          quantity: 1,
+                        },
+                      })
+                      await router.invalidate({ sync: true })
+                      await queryClient.invalidateQueries({
+                        queryKey: ['cart-items-data'],
+                      })
+                    }}
                   >
                     <ShoppingBagIcon size={16} />
                     Add to cart
@@ -133,21 +179,26 @@ function RouteComponent() {
             </div>
           </div>
         </Card>
-        <Suspense fallback={
-          <div >
-            <h2 className='text-2xl font-bold my-4'>Recommended Products</h2>
-            <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-3'>
-            {Array.from({length : 6}).map((_,index) => (
-              
-              <Skeleton key={index} className='w-full h-48'/>
-              
-            ))}
-            </div>
-          </div>}>
-          <RecommendedProducts recommendedProducts={recommendedProducts}/>
-        </Suspense>
-        
-      </Card> 
+
+        <div className="mb-6">
+          <Suspense
+            fallback={
+              <div>
+                <h2 className="text-2xl font-bold my-4">
+                  Recommended Products
+                </h2>
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {Array.from({ length: 6 }).map((_, index) => (
+                    <Skeleton key={index} className="w-full h-48" />
+                  ))}
+                </div>
+              </div>
+            }
+          >
+            <RecommendedProducts recommendedProducts={recommendedProducts} />
+          </Suspense>
+        </div>
+      </Card>
     </div>
   )
 }
