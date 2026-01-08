@@ -11,9 +11,8 @@ const fetchProducts = createServerFn({method : 'GET'}).handler(async () => {
 })
 
 const loggerMiddleware = createMiddleware().server(
-    async ({ next, request}) => {
-        console.log('--loggerMiddleware--', request.url, 'from', request.headers.get('origin'),
-    )
+    async ({ next}) => {
+
         return next()
     },
 )
@@ -21,7 +20,7 @@ const loggerMiddleware = createMiddleware().server(
 export const Route = createFileRoute('/products/')({
   component: RouteComponent,
   loader: async () => {
-    console.log('---loader---')
+    
     return fetchProducts()
   },
   
